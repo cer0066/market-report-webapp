@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>电力市场报表自动填报工具</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">金川 · Excel 自动填报</p>
+          <h1>电力市场报表自动填报工具</h1>
+        </div>
+        <div class="date-box">
+          <label for="targetDate">交易标的日期</label>
+          <input id="targetDate" type="date" value="2026-08-07" />
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="panel upload-panel">
+          <div class="panel-head">
+            <h2>文件清单</h2>
+            <span id="healthBadge" class="badge">检查中</span>
+          </div>
+
+          <form id="uploadForm" class="file-list">
+            <label class="file-row">
+              <span>
+                <strong>最终报送表模板</strong>
+                <small>包含水电、光伏等 sheet</small>
+              </span>
+              <input name="template" type="file" accept=".xlsx" />
+            </label>
+
+            <div class="file-group-title">水电资料 · 俄日/红卫桥</div>
+            <div class="source-grid">
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内优先</strong>
+                  <small>优先电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="hydro_priority" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_hydro_priority" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>留存</strong>
+                  <small>留存电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="hydro_retention" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_hydro_retention" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内市场</strong>
+                  <small>中长期合同</small>
+                </span>
+                <div class="file-actions">
+                  <input name="hydro_contract" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_hydro_contract" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省间外送</strong>
+                  <small>转让后外送</small>
+                </span>
+                <div class="file-actions">
+                  <input name="hydro_export" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_hydro_export" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+            </div>
+
+            <div class="file-group-title">光伏资料 · 腾龙/凤舞</div>
+            <div class="source-grid">
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内优先</strong>
+                  <small>优先电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_priority_tenglong_fengwu" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_priority_tenglong_fengwu" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>留存</strong>
+                  <small>留存电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_retention_tenglong_fengwu" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_retention_tenglong_fengwu" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内市场</strong>
+                  <small>中长期合同</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_contract_tenglong_fengwu" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_contract_tenglong_fengwu" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省间外送</strong>
+                  <small>转让后外送</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_export_tenglong_fengwu" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_export_tenglong_fengwu" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+            </div>
+
+            <div class="file-group-title">光伏资料 · 赛日</div>
+            <div class="source-grid">
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内优先</strong>
+                  <small>优先电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_priority_sairi" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_priority_sairi" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>留存</strong>
+                  <small>留存电量</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_retention_sairi" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_retention_sairi" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省内市场</strong>
+                  <small>中长期合同</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_contract_sairi" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_contract_sairi" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+              <label class="file-row compact-row">
+                <span>
+                  <strong>省间外送</strong>
+                  <small>转让后外送</small>
+                </span>
+                <div class="file-actions">
+                  <input name="pv_export_sairi" type="file" accept=".xlsx" />
+                  <label class="no-data-toggle">
+                    <input name="no_data_pv_export_sairi" type="checkbox" value="1" />
+                    <span>今日无数据</span>
+                  </label>
+                </div>
+              </label>
+            </div>
+          </form>
+
+          <div class="actions">
+            <button id="runUpload" class="primary">上传并计算</button>
+          </div>
+        </aside>
+
+        <section class="main-panel">
+          <section class="panel rules-panel">
+            <div class="panel-head">
+              <h2>计算规则</h2>
+              <span class="badge ok">水电 + 光伏</span>
+            </div>
+            <div class="rule-strip">
+              <span><b>电费</b> = 电量 ×（电价 + 绿证价格）</span>
+              <span><b>加权电价</b> = 汇总电费 / 汇总电量</span>
+              <span><b>15分钟电量</b> = 小时电量 / 4</span>
+              <span><b>无资料</b> 点“今日无数据”，模板保持原样</span>
+              <span><b>保护列</b> 出清、实时、上网列不覆盖</span>
+            </div>
+          </section>
+
+          <section class="panel status-panel">
+            <div class="panel-head">
+              <h2>处理状态</h2>
+              <a id="downloadLink" class="download disabled" href="#">导出 Excel</a>
+            </div>
+            <div id="statusList" class="status-list">
+              <div class="empty">选择文件后点击计算，或直接用当前目录样例跑一遍。</div>
+            </div>
+          </section>
+
+          <section class="panel preview-panel">
+            <div class="panel-head">
+              <h2>结果预览</h2>
+              <div id="tabs" class="tabs"></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>时段</th>
+                    <th>省内优先电量</th>
+                    <th>省内优先电价</th>
+                    <th>留存电量</th>
+                    <th>留存电价</th>
+                    <th>省内市场电量</th>
+                    <th>省内市场电价</th>
+                    <th>省间外送电量</th>
+                    <th>省间外送电价</th>
+                  </tr>
+                </thead>
+                <tbody id="previewBody">
+                  <tr>
+                    <td colspan="9" class="empty-cell">暂无预览数据</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
