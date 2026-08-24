@@ -6,7 +6,9 @@ import os
 import re
 import shutil
 import sys
+import threading
 import traceback
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from email.parser import BytesParser
@@ -27,6 +29,8 @@ STATIC_DIR = BASE_DIR / "static"
 OUTPUT_DIR = BASE_DIR / "outputs"
 UPLOAD_DIR = BASE_DIR / "uploads"
 SAMPLE_DIR = BASE_DIR.parent
+JOBS: dict[str, dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
 
 SHEET_UNITS = {
     "水电": ("俄日", "红卫桥"),
@@ -697,6 +701,48 @@ def no_data_flags_from_fields(fields: dict[str, str]) -> set[str]:
     return flags
 
 
+def start_process_job(files: dict[str, bytes], target_date: str, no_data_flags: set[str]) -> str:
+    job_id = uuid.uuid4().hex
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "id": job_id,
+            "status": "running",
+            "message": "文件已上传，正在计算",
+            "createdAt": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    def run_job() -> None:
+        try:
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务开始：{job_id}")
+            result = process_files(files, target_date, no_data_flags)
+            with JOBS_LOCK:
+                JOBS[job_id].update(
+                    {
+                        "status": "done",
+                        "message": "计算完成",
+                        "finishedAt": datetime.now().isoformat(timespec="seconds"),
+                        "result": result,
+                    }
+                )
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务完成：{job_id}")
+        except Exception as exc:
+            detail = str(exc) if isinstance(exc, AppError) else "处理失败，请检查文件格式"
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务失败：{job_id}，{repr(exc)}")
+            traceback.print_exc()
+            with JOBS_LOCK:
+                JOBS[job_id].update(
+                    {
+                        "status": "error",
+                        "message": "计算失败",
+                        "finishedAt": datetime.now().isoformat(timespec="seconds"),
+                        "error": detail,
+                    }
+                )
+
+    threading.Thread(target=run_job, name=f"process-{job_id[:8]}", daemon=True).start()
+    return job_id
+
+
 class MarketReportHandler(BaseHTTPRequestHandler):
     server_version = "MarketReportWebApp/1.0"
 
@@ -710,6 +756,14 @@ class MarketReportHandler(BaseHTTPRequestHandler):
             elif path.startswith("/static/"):
                 file_path = STATIC_DIR / path.removeprefix("/static/")
                 self.send_file(file_path)
+            elif path.startswith("/api/jobs/"):
+                job_id = Path(path.removeprefix("/api/jobs/")).name
+                with JOBS_LOCK:
+                    job = JOBS.get(job_id)
+                    payload = copy.deepcopy(job) if job else None
+                if not payload:
+                    raise AppError("任务不存在或已过期，请重新上传计算")
+                self.send_json(payload)
             elif path.startswith("/download/"):
                 file_name = Path(path.removeprefix("/download/")).name
                 self.send_file(OUTPUT_DIR / file_name, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name=file_name)
@@ -723,12 +777,12 @@ class MarketReportHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/process":
                 fields, files = parse_multipart(self)
-                result = process_files(
+                job_id = start_process_job(
                     files,
                     fields.get("target_date", ""),
                     no_data_flags_from_fields(fields),
                 )
-                self.send_json(result)
+                self.send_json({"jobId": job_id, "status": "running", "message": "文件已上传，正在后台计算"}, 202)
             elif path == "/api/process-sample":
                 payload = parse_json_body(self)
                 result = process_files(sample_file_bytes(), payload.get("target_date", ""))
