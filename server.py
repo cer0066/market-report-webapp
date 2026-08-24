@@ -363,6 +363,8 @@ def collect_source(content: bytes, spec: SourceSpec, target_date: str, report_sh
                 values["fee"] = 0.0
                 values["price"] = 0.0
                 values["quarter_quantity"] = 0.0
+                if spec.market_key == "export" and values.get("rows"):
+                    values["keep_template_price"] = True
             else:
                 values["price"] = values["fee"] / quantity if quantity else None
                 values["quarter_quantity"] = quantity / 4 if quantity else 0
@@ -451,6 +453,21 @@ def reset_pv_market(
     return reset_count
 
 
+def snapshot_market_prices(
+    wb,
+    sheet_blocks: dict[str, dict[str, dict[str, Any]]],
+) -> dict[tuple[str, str, str, int], Any]:
+    prices: dict[tuple[str, str, str, int], Any] = {}
+    for sheet_name, blocks in sheet_blocks.items():
+        ws = wb[sheet_name]
+        for unit, block in blocks.items():
+            rows = sorted(set(block["rowByTime"].values()))
+            for market_label, (_quantity_col, price_col) in block["markets"].items():
+                for row in rows:
+                    prices[(sheet_name, unit, market_label, row)] = ws.cell(row, price_col).value
+    return prices
+
+
 def apply_to_template(
     template_content: bytes,
     sources: list[dict[str, Any]],
@@ -474,6 +491,7 @@ def apply_to_template(
     fill_count = 0
     warnings: list[str] = []
     filled_cells: list[dict[str, Any]] = []
+    template_prices = snapshot_market_prices(wb, sheet_blocks)
 
     if "光伏" in sheet_blocks:
         uploaded_keys = {source.get("inputKey") for source in sources}
@@ -531,14 +549,23 @@ def apply_to_template(
                     warnings.append(f"{report_sheet} {unit} {slot} 在模板中缺少 15 分钟点：{', '.join(missing_labels)}")
                     continue
 
+                written_price = None
                 for label in labels:
                     row = block["rowByTime"][label]
                     quantity_cell = ws.cell(row, quantity_col)
                     price_cell = ws.cell(row, price_col)
                     quantity_cell.value = round(values["quarter_quantity"], 2)
                     quantity_cell.number_format = "0.00"
-                    price_cell.value = None if values["price"] is None else round(values["price"], 2)
+                    if values.get("keep_template_price"):
+                        price_cell.value = template_prices.get(
+                            (report_sheet, unit, market_label, row),
+                            price_cell.value,
+                        )
+                    else:
+                        price_cell.value = None if values["price"] is None else round(values["price"], 2)
                     price_cell.number_format = "0.00"
+                    if written_price is None:
+                        written_price = price_cell.value
                     fill_count += 2
 
                 filled_cells.append(
@@ -550,7 +577,7 @@ def apply_to_template(
                         "quantityCol": get_column_letter(quantity_col),
                         "priceCol": get_column_letter(price_col),
                         "quantity": values["quantity"],
-                        "price": values["price"],
+                        "price": written_price,
                         "rows": values["rows"],
                     }
                 )
