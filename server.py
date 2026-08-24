@@ -55,6 +55,9 @@ MARKET_LABELS = {
     "export": "省间外送",
 }
 
+PV_RESET_MARKETS = tuple(MARKET_LABELS.values())
+NEAR_ZERO_QUANTITY = 1e-6
+
 PROTECTED_RANGES_BY_SHEET = {
     "水电": ("L:P", "AC:AG"),
     "光伏": ("L:P", "AC:AG", "AT:AX"),
@@ -340,8 +343,14 @@ def collect_source(content: bytes, spec: SourceSpec, target_date: str, report_sh
     for unit, slots in grouped.items():
         for slot, values in slots.items():
             quantity = values["quantity"]
-            values["price"] = values["fee"] / quantity if quantity else None
-            values["quarter_quantity"] = quantity / 4 if quantity else 0
+            if report_sheet == "光伏" and abs(quantity) < NEAR_ZERO_QUANTITY:
+                values["quantity"] = 0.0
+                values["fee"] = 0.0
+                values["price"] = 0.0
+                values["quarter_quantity"] = 0.0
+            else:
+                values["price"] = values["fee"] / quantity if quantity else None
+                values["quarter_quantity"] = quantity / 4 if quantity else 0
 
     date_sample = sorted(seen_dates)[:6]
     if len(seen_dates) > 6:
@@ -400,6 +409,28 @@ def find_unit_blocks(ws, units: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     return blocks
 
 
+def reset_pv_day_ahead_markets(ws, blocks: dict[str, dict[str, Any]]) -> int:
+    reset_count = 0
+    for unit in SHEET_UNITS["光伏"]:
+        block = blocks.get(unit)
+        if not block:
+            continue
+        rows = sorted(set(block["rowByTime"].values()))
+        for market_label in PV_RESET_MARKETS:
+            if market_label not in block["markets"]:
+                continue
+            quantity_col, price_col = block["markets"][market_label]
+            for row in rows:
+                quantity_cell = ws.cell(row, quantity_col)
+                price_cell = ws.cell(row, price_col)
+                quantity_cell.value = 0
+                quantity_cell.number_format = "0.00"
+                price_cell.value = 0
+                price_cell.number_format = "0.00"
+                reset_count += 2
+    return reset_count
+
+
 def apply_to_template(template_content: bytes, sources: list[dict[str, Any]], target_date: str) -> dict[str, Any]:
     wb = read_template(template_content)
     sheet_blocks: dict[str, dict[str, dict[str, Any]]] = {}
@@ -417,6 +448,9 @@ def apply_to_template(template_content: bytes, sources: list[dict[str, Any]], ta
     fill_count = 0
     warnings: list[str] = []
     filled_cells: list[dict[str, Any]] = []
+
+    if "光伏" in sheet_blocks:
+        fill_count += reset_pv_day_ahead_markets(wb["光伏"], sheet_blocks["光伏"])
 
     for source in sources:
         report_sheet = source["reportSheet"]
@@ -567,11 +601,14 @@ def process_files(files: dict[str, bytes], target_date: str, no_data_flags: set[
                 }
             )
         elif marked_no_data:
+            detail = "已确认今日无数据，模板对应列保持原样"
+            if input_key.startswith("pv_"):
+                detail = "已确认今日无数据，光伏四类日前交易列按 0 回填"
             checks.append(
                 {
                     "status": "ok",
                     "title": label,
-                    "detail": "已确认今日无数据，模板对应列保持原样",
+                    "detail": detail,
                 }
             )
         elif not has_file:
