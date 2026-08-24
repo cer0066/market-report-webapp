@@ -166,17 +166,55 @@ function setupDropUploads() {
   });
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollJob(jobId) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || "查询计算进度失败");
+    if (job.status === "done") {
+      applyResult(job.result);
+      return;
+    }
+    if (job.status === "error") {
+      throw new Error(job.error || "计算失败");
+    }
+    renderStatus([
+      {
+        status: "warn",
+        title: "正在计算",
+        detail: job.message || "云端正在处理 Excel，请稍等",
+      },
+    ]);
+    await wait(2000);
+  }
+  throw new Error("计算等待时间过长，请稍后在 Render 日志中查看是否仍在运行");
+}
+
 async function runWithUploads() {
   const data = new FormData(form);
   data.append("target_date", targetDate.value);
   setBusy(true);
+  renderStatus([{ status: "warn", title: "正在上传", detail: "正在上传文件并创建计算任务" }]);
   try {
     const response = await fetch("/api/process", { method: "POST", body: data });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "计算失败");
-    applyResult(result);
+    if (result.jobId) {
+      renderStatus([{ status: "warn", title: "正在计算", detail: "后台计算任务已创建，正在等待结果" }]);
+      await pollJob(result.jobId);
+    } else {
+      applyResult(result);
+    }
   } catch (error) {
-    showError(error.message);
+    const message =
+      error.message === "Failed to fetch"
+        ? "网络连接中断：请先确认日期填对，等 Render 免费服务唤醒后再试一次；如果仍失败，请查看 Render Logs 最新的“后台任务失败”一行。"
+        : error.message;
+    showError(message);
   } finally {
     setBusy(false);
   }
