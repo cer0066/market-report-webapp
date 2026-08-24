@@ -204,6 +204,7 @@ async function runWithUploads() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "计算失败");
     if (result.jobId) {
+      renderStatus([{ status: "warn", title: "正在计算", detail: "后台计算任务已创建，正在等待结果" }]);
       await pollJob(result.jobId);
     } else {
       applyResult(result);

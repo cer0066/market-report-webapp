@@ -713,7 +713,7 @@ def start_process_job(files: dict[str, bytes], target_date: str, no_data_flags: 
 
     def run_job() -> None:
         try:
-            print(f"[{datetime.now():%H:%M:%S}] 后台任务开始：{job_id}")
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务开始：{job_id}", flush=True)
             result = process_files(files, target_date, no_data_flags)
             with JOBS_LOCK:
                 JOBS[job_id].update(
@@ -724,10 +724,10 @@ def start_process_job(files: dict[str, bytes], target_date: str, no_data_flags: 
                         "result": result,
                     }
                 )
-            print(f"[{datetime.now():%H:%M:%S}] 后台任务完成：{job_id}")
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务完成：{job_id}", flush=True)
         except Exception as exc:
             detail = str(exc) if isinstance(exc, AppError) else "处理失败，请检查文件格式"
-            print(f"[{datetime.now():%H:%M:%S}] 后台任务失败：{job_id}，{repr(exc)}")
+            print(f"[{datetime.now():%H:%M:%S}] 后台任务失败：{job_id}，{repr(exc)}", flush=True)
             traceback.print_exc()
             with JOBS_LOCK:
                 JOBS[job_id].update(
@@ -854,8 +854,8 @@ def main():
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     httpd = ThreadingHTTPServer((host, port), MarketReportHandler)
     local_url = f"http://127.0.0.1:{port}" if host == "0.0.0.0" else f"http://{host}:{port}"
-    print(f"电力市场报表自动填报工具已启动：{local_url}")
-    print("按 Ctrl+C 停止服务")
+    print(f"电力市场报表自动填报工具已启动：{local_url}", flush=True)
+    print("按 Ctrl+C 停止服务", flush=True)
     httpd.serve_forever()
 
 
