@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cgi
 import copy
 import json
 import os
@@ -10,6 +9,8 @@ import sys
 import traceback
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -636,36 +637,38 @@ def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def parse_multipart(handler: BaseHTTPRequestHandler) -> tuple[dict[str, str], dict[str, bytes]]:
-    ctype, pdict = cgi.parse_header(handler.headers.get("Content-Type", ""))
-    if ctype != "multipart/form-data":
+    content_type = handler.headers.get("Content-Type", "")
+    if not content_type.lower().startswith("multipart/form-data"):
         raise AppError("请求格式错误，请使用网页上传文件")
-    pdict["boundary"] = bytes(pdict["boundary"], "utf-8")
-    form = cgi.FieldStorage(
-        fp=handler.rfile,
-        headers=handler.headers,
-        environ={
-            "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": handler.headers.get("Content-Type"),
-        },
-        keep_blank_values=True,
+    length = int(handler.headers.get("Content-Length", "0") or 0)
+    raw_body = handler.rfile.read(length)
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: " + content_type.encode("utf-8") + b"\r\n"
+        b"MIME-Version: 1.0\r\n\r\n" + raw_body
     )
+    if not message.is_multipart():
+        raise AppError("请求格式错误，未读取到上传内容")
 
     fields: dict[str, str] = {}
     files: dict[str, bytes] = {}
     run_dir = UPLOAD_DIR / datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    for key in form.keys():
-        item = form[key]
-        if isinstance(item, list):
-            item = item[0]
-        if item.filename:
-            content = item.file.read()
-            files[key] = content
-            safe_name = Path(item.filename).name
-            (run_dir / safe_name).write_bytes(content)
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        key = part.get_param("name", header="content-disposition")
+        if not key:
+            continue
+        filename = part.get_filename()
+        payload = part.get_payload(decode=True) or b""
+        if filename:
+            files[key] = payload
+            safe_name = Path(filename).name
+            (run_dir / safe_name).write_bytes(payload)
         else:
-            fields[key] = item.value
+            charset = part.get_content_charset() or "utf-8"
+            fields[key] = payload.decode(charset, errors="replace")
 
     return fields, files
 
