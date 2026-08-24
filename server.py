@@ -749,17 +749,20 @@ class MarketReportHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data: dict[str, Any], status: int = 200):
         body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            print(f"[{datetime.now():%H:%M:%S}] 客户端连接已断开，响应未发送：{exc}")
 
     def send_error_json(self, exc: Exception):
         detail = str(exc) if isinstance(exc, AppError) else "处理失败，请检查文件格式"
-        if not isinstance(exc, AppError):
-            traceback.print_exc()
+        print(f"[{datetime.now():%H:%M:%S}] 处理请求失败：{repr(exc)}")
+        traceback.print_exc()
         self.send_json({"error": detail}, 400)
 
     def send_file(self, path: Path, content_type: str | None = None, download_name: str | None = None):
