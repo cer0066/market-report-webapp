@@ -57,6 +57,7 @@ MARKET_LABELS = {
 
 PV_RESET_MARKETS = tuple(MARKET_LABELS.values())
 NEAR_ZERO_QUANTITY = 1e-6
+SUMMARY_LABELS = {"汇总", "合计", "总计", "总总"}
 
 INPUT_UNITS = {
     "hydro_contract": ("俄日", "红卫桥"),
@@ -209,6 +210,10 @@ def to_number(value: Any, default: float = 0.0) -> float:
         return float(text)
     except ValueError:
         return default
+
+
+def is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() == "")
 
 
 def normalize_date(value: Any) -> str:
@@ -413,7 +418,7 @@ def find_unit_blocks(ws, units: tuple[str, ...]) -> dict[str, dict[str, Any]]:
         row_by_time: dict[str, int] = {}
         for row in range(4, ws.max_row + 1):
             label = normalize_time(ws.cell(row, start_col).value)
-            if label:
+            if re.fullmatch(r"\d{2}:\d{2}", label):
                 row_by_time[label] = row
 
         blocks[unit] = {
@@ -468,6 +473,82 @@ def snapshot_market_prices(
     return prices
 
 
+def find_summary_row(ws, block: dict[str, Any]) -> int:
+    data_rows = sorted(set(block["rowByTime"].values()))
+    last_data_row = max(data_rows)
+    for row in range(last_data_row + 1, min(ws.max_row, last_data_row + 6) + 1):
+        label = str(ws.cell(row, block["startCol"]).value or "").strip()
+        if label in SUMMARY_LABELS:
+            return row
+    return last_data_row + 1
+
+
+def restore_unwritten_template_prices(
+    wb,
+    sheet_blocks: dict[str, dict[str, dict[str, Any]]],
+    template_prices: dict[tuple[str, str, str, int], Any],
+    targets: set[tuple[str, str, str]],
+    written_price_cells: set[tuple[str, str, str, int]],
+) -> int:
+    restored = 0
+    for sheet_name, unit, market_label in targets:
+        if sheet_name != "光伏":
+            continue
+        blocks = sheet_blocks.get(sheet_name, {})
+        block = blocks.get(unit)
+        if not block or market_label not in block["markets"]:
+            continue
+        ws = wb[sheet_name]
+        quantity_col, price_col = block["markets"][market_label]
+        for row in sorted(set(block["rowByTime"].values())):
+            key = (sheet_name, unit, market_label, row)
+            if key in written_price_cells:
+                continue
+            template_price = template_prices.get(key)
+            if is_blank(template_price):
+                continue
+            quantity = to_number(ws.cell(row, quantity_col).value)
+            if abs(quantity) >= NEAR_ZERO_QUANTITY:
+                continue
+            price_cell = ws.cell(row, price_col)
+            price_cell.value = template_price
+            price_cell.number_format = "0.00"
+            restored += 1
+    return restored
+
+
+def apply_market_summaries(
+    wb,
+    sheet_blocks: dict[str, dict[str, dict[str, Any]]],
+    targets: set[tuple[str, str, str]],
+) -> int:
+    updated = 0
+    for sheet_name, unit, market_label in targets:
+        blocks = sheet_blocks.get(sheet_name, {})
+        block = blocks.get(unit)
+        if not block or market_label not in block["markets"]:
+            continue
+        rows = sorted(set(block["rowByTime"].values()))
+        if not rows:
+            continue
+        ws = wb[sheet_name]
+        quantity_col, price_col = block["markets"][market_label]
+        first_row = min(rows)
+        last_row = max(rows)
+        summary_row = find_summary_row(ws, block)
+        quantity_letter = get_column_letter(quantity_col)
+        price_letter = get_column_letter(price_col)
+
+        quantity_cell = ws.cell(summary_row, quantity_col)
+        price_cell = ws.cell(summary_row, price_col)
+        quantity_cell.value = f"=SUM({quantity_letter}{first_row}:{quantity_letter}{last_row})"
+        quantity_cell.number_format = "0.00"
+        price_cell.value = f"={price_letter}{last_row}"
+        price_cell.number_format = "0.00"
+        updated += 2
+    return updated
+
+
 def apply_to_template(
     template_content: bytes,
     sources: list[dict[str, Any]],
@@ -492,6 +573,8 @@ def apply_to_template(
     warnings: list[str] = []
     filled_cells: list[dict[str, Any]] = []
     template_prices = snapshot_market_prices(wb, sheet_blocks)
+    active_market_targets: set[tuple[str, str, str]] = set()
+    written_price_cells: set[tuple[str, str, str, int]] = set()
 
     if "光伏" in sheet_blocks:
         uploaded_keys = {source.get("inputKey") for source in sources}
@@ -513,10 +596,13 @@ def apply_to_template(
             input_key = source.get("inputKey")
             if source["reportSheet"] != "光伏" or not input_key:
                 continue
+            units = INPUT_UNITS.get(input_key, SHEET_UNITS["光伏"])
+            for unit in units:
+                active_market_targets.add(("光伏", unit, source["marketLabel"]))
             fill_count += reset_pv_market(
                 wb["光伏"],
                 sheet_blocks["光伏"],
-                INPUT_UNITS.get(input_key, SHEET_UNITS["光伏"]),
+                units,
                 source["marketLabel"],
                 0,
             )
@@ -529,6 +615,7 @@ def apply_to_template(
         grouped = source["grouped"]
         units_to_fill = INPUT_UNITS.get(source.get("inputKey"), SHEET_UNITS[report_sheet])
         for unit in units_to_fill:
+            active_market_targets.add((report_sheet, unit, market_label))
             if unit not in blocks:
                 warnings.append(f"{report_sheet} sheet 未找到 {unit} 列块")
                 continue
@@ -564,6 +651,7 @@ def apply_to_template(
                     else:
                         price_cell.value = None if values["price"] is None else round(values["price"], 2)
                     price_cell.number_format = "0.00"
+                    written_price_cells.add((report_sheet, unit, market_label, row))
                     if written_price is None:
                         written_price = price_cell.value
                     fill_count += 2
@@ -582,6 +670,15 @@ def apply_to_template(
                     }
                 )
 
+    fill_count += restore_unwritten_template_prices(
+        wb,
+        sheet_blocks,
+        template_prices,
+        active_market_targets,
+        written_price_cells,
+    )
+    fill_count += apply_market_summaries(wb, sheet_blocks, active_market_targets)
+
     for sheet_name, protected_cells in protected_by_sheet.items():
         restore_ranges(wb[sheet_name], protected_cells)
 
@@ -590,6 +687,9 @@ def apply_to_template(
     output_name = f"现货市场出清情况-金川_自动填报_{safe_date}_{timestamp}.xlsx"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / output_name
+    wb.calculation.calcMode = "auto"
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
     wb.save(output_path)
 
     return {
