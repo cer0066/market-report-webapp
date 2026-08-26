@@ -368,8 +368,6 @@ def collect_source(content: bytes, spec: SourceSpec, target_date: str, report_sh
                 values["fee"] = 0.0
                 values["price"] = 0.0
                 values["quarter_quantity"] = 0.0
-                if spec.market_key == "export" and values.get("rows"):
-                    values["keep_template_price"] = True
             else:
                 values["price"] = values["fee"] / quantity if quantity else None
                 values["quarter_quantity"] = quantity / 4 if quantity else 0
@@ -458,21 +456,6 @@ def reset_pv_market(
     return reset_count
 
 
-def snapshot_market_prices(
-    wb,
-    sheet_blocks: dict[str, dict[str, dict[str, Any]]],
-) -> dict[tuple[str, str, str, int], Any]:
-    prices: dict[tuple[str, str, str, int], Any] = {}
-    for sheet_name, blocks in sheet_blocks.items():
-        ws = wb[sheet_name]
-        for unit, block in blocks.items():
-            rows = sorted(set(block["rowByTime"].values()))
-            for market_label, (_quantity_col, price_col) in block["markets"].items():
-                for row in rows:
-                    prices[(sheet_name, unit, market_label, row)] = ws.cell(row, price_col).value
-    return prices
-
-
 def find_summary_row(ws, block: dict[str, Any]) -> int:
     data_rows = sorted(set(block["rowByTime"].values()))
     last_data_row = max(data_rows)
@@ -481,40 +464,6 @@ def find_summary_row(ws, block: dict[str, Any]) -> int:
         if label in SUMMARY_LABELS:
             return row
     return last_data_row + 1
-
-
-def restore_unwritten_template_prices(
-    wb,
-    sheet_blocks: dict[str, dict[str, dict[str, Any]]],
-    template_prices: dict[tuple[str, str, str, int], Any],
-    targets: set[tuple[str, str, str]],
-    written_price_cells: set[tuple[str, str, str, int]],
-) -> int:
-    restored = 0
-    for sheet_name, unit, market_label in targets:
-        if sheet_name != "光伏":
-            continue
-        blocks = sheet_blocks.get(sheet_name, {})
-        block = blocks.get(unit)
-        if not block or market_label not in block["markets"]:
-            continue
-        ws = wb[sheet_name]
-        quantity_col, price_col = block["markets"][market_label]
-        for row in sorted(set(block["rowByTime"].values())):
-            key = (sheet_name, unit, market_label, row)
-            if key in written_price_cells:
-                continue
-            template_price = template_prices.get(key)
-            if is_blank(template_price):
-                continue
-            quantity = to_number(ws.cell(row, quantity_col).value)
-            if abs(quantity) >= NEAR_ZERO_QUANTITY:
-                continue
-            price_cell = ws.cell(row, price_col)
-            price_cell.value = template_price
-            price_cell.number_format = "0.00"
-            restored += 1
-    return restored
 
 
 def apply_market_summaries(
@@ -572,9 +521,7 @@ def apply_to_template(
     fill_count = 0
     warnings: list[str] = []
     filled_cells: list[dict[str, Any]] = []
-    template_prices = snapshot_market_prices(wb, sheet_blocks)
     active_market_targets: set[tuple[str, str, str]] = set()
-    written_price_cells: set[tuple[str, str, str, int]] = set()
 
     if "光伏" in sheet_blocks:
         uploaded_keys = {source.get("inputKey") for source in sources}
@@ -643,15 +590,8 @@ def apply_to_template(
                     price_cell = ws.cell(row, price_col)
                     quantity_cell.value = round(values["quarter_quantity"], 2)
                     quantity_cell.number_format = "0.00"
-                    if values.get("keep_template_price"):
-                        price_cell.value = template_prices.get(
-                            (report_sheet, unit, market_label, row),
-                            price_cell.value,
-                        )
-                    else:
-                        price_cell.value = None if values["price"] is None else round(values["price"], 2)
+                    price_cell.value = None if values["price"] is None else round(values["price"], 2)
                     price_cell.number_format = "0.00"
-                    written_price_cells.add((report_sheet, unit, market_label, row))
                     if written_price is None:
                         written_price = price_cell.value
                     fill_count += 2
@@ -670,13 +610,6 @@ def apply_to_template(
                     }
                 )
 
-    fill_count += restore_unwritten_template_prices(
-        wb,
-        sheet_blocks,
-        template_prices,
-        active_market_targets,
-        written_price_cells,
-    )
     fill_count += apply_market_summaries(wb, sheet_blocks, active_market_targets)
 
     for sheet_name, protected_cells in protected_by_sheet.items():
