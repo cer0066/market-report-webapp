@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote, urlparse
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -76,6 +76,10 @@ INPUT_UNITS = {
 
 PROTECTED_RANGES_BY_SHEET = {
     "水电": ("L:P", "AC:AG"),
+    "光伏": (),
+}
+
+CLEAR_DATA_RANGES_BY_SHEET = {
     "光伏": ("L:P", "AC:AG", "AT:AX"),
 }
 
@@ -615,6 +619,10 @@ def apply_to_template(
     for sheet_name, protected_cells in protected_by_sheet.items():
         restore_ranges(wb[sheet_name], protected_cells)
 
+    for sheet_name, ranges in CLEAR_DATA_RANGES_BY_SHEET.items():
+        if sheet_name in sheet_blocks and sheet_name in wb.sheetnames:
+            fill_count += clear_data_ranges(wb[sheet_name], ranges)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_date = target_date.replace("-", "")
     output_name = f"现货市场出清情况-金川_自动填报_{safe_date}_{timestamp}.xlsx"
@@ -652,6 +660,23 @@ def restore_ranges(ws, cells: dict[str, tuple[Any, str, Any]]) -> None:
         cell.value = value
         cell.number_format = number_format
         cell._style = style
+
+
+def clear_data_ranges(ws, ranges: tuple[str, ...]) -> int:
+    cleared = 0
+    for range_text in ranges:
+        start_col_text, end_col_text = range_text.split(":", 1)
+        start_col = column_index_from_string(start_col_text)
+        end_col = column_index_from_string(end_col_text)
+        for row in range(4, ws.max_row + 1):
+            for col in range(start_col, end_col + 1):
+                cell = ws.cell(row, col)
+                if isinstance(cell, MergedCell):
+                    continue
+                if not is_blank(cell.value):
+                    cleared += 1
+                cell.value = None
+    return cleared
 
 
 def build_preview(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
